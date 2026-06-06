@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake — Click to Explode</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #13131a;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --muted: #5a5a7a;
+    --accent: #7c6af5;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #hud {
+    display: flex;
+    gap: 32px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  #hud span b {
+    color: var(--text);
+    font-weight: 700;
+    margin-left: 6px;
+  }
+
+  #game-wrap {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 60px rgba(124, 106, 245, 0.08);
+  }
+
+  canvas {
+    display: block;
+    cursor: crosshair;
+  }
+
+  #msg {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    height: 14px;
+    transition: color 0.3s;
+  }
+
+  #msg.flash { color: var(--text); }
+
+  #controls {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-align: center;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<h1>Snake</h1>
+
+<div id="hud">
+  <span>Score<b id="score">0</b></span>
+  <span>Apples<b id="apple-count">0</b></span>
+  <span>Explosions<b id="exp-count">0</b></span>
+</div>
+
+<div id="game-wrap">
+  <canvas id="game-canvas" width="480" height="480"></canvas>
+</div>
+
+<div id="msg">Click the snake to explode it</div>
+
+<div id="controls">
+  Arrow keys / WASD to steer &nbsp;·&nbsp; Click snake to explode
+</div>
+
+<script>
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+const msgEl = document.getElementById('msg');
+
+const COLS = 24, ROWS = 24, CELL = 20;
+const SNAKE_COLORS = [
+  '#4ade80', '#f472b6', '#60a5fa', '#fb923c',
+  '#a78bfa', '#34d399', '#facc15', '#f87171',
+  '#38bdf8', '#e879f9', '#86efac'
+];
+
+let snake, dir, nextDir, apples, particles, score, explosions;
+let gameLoop, appleTimer;
+
+function rndColor(exclude) {
+  let c;
+  do { c = SNAKE_COLORS[Math.floor(Math.random() * SNAKE_COLORS.length)]; }
+  while (c === exclude);
+  return c;
+}
+
+function initSnake(keepBody) {
+  const color = rndColor(snake ? snake.color : null);
+  if (keepBody && snake) {
+    snake.color = color;
+    snake.alive = true;
+  } else {
+    const cx = Math.floor(COLS / 2), cy = Math.floor(ROWS / 2);
+    snake = {
+      body: [{x:cx,y:cy},{x:cx-1,y:cy},{x:cx-2,y:cy}],
+      color, alive: true
+    };
+  }
+  dir = {x:1, y:0};
+  nextDir = {x:1, y:0};
+}
+
+function spawnApple() {
+  const occupied = new Set(snake.body.map(s => s.x+','+s.y));
+  apples.forEach(a => occupied.add(a.x+','+a.y));
+  let pos = {x:0,y:0};
+  for (let i = 0; i < 300; i++) {
+    pos = {x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS)};
+    if (!occupied.has(pos.x+','+pos.y)) break;
+  }
+  apples.push({...pos, pulse: Math.random() * Math.PI * 2});
+}
+
+function explode() {
+  explosions++;
+  document.getElementById('exp-count').textContent = explosions;
+
+  const oldColor = snake.color;
+  snake.body.forEach(seg => {
+    const cx = seg.x * CELL + CELL/2;
+    const cy = seg.y * CELL + CELL/2;
+    for (let i = 0; i < 12; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 4;
+      particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1,
+        life: 1,
+        decay: 0.015 + Math.random() * 0.025,
+        size: 2 + Math.random() * 5,
+        color: oldColor,
+        square: Math.random() > 0.5
+      });
+    }
+  });
+
+  initSnake(true);
+  flash(`Respawned — new color: ${snake.color}`);
+}
+
+function flash(txt) {
+  msgEl.textContent = txt;
+  msgEl.classList.add('flash');
+  clearTimeout(msgEl._t);
+  msgEl._t = setTimeout(() => {
+    msgEl.classList.remove('flash');
+    msgEl.textContent = 'Click the snake to explode it';
+  }, 1400);
+}
+
+function step() {
+  dir = {...nextDir};
+  const head = {x: (snake.body[0].x + dir.x + COLS) % COLS,
+                y: (snake.body[0].y + dir.y + ROWS) % ROWS};
+
+  if (snake.body.some(s => s.x === head.x && s.y === head.y)) {
+    explode(); return;
+  }
+
+  snake.body.unshift(head);
+  let ate = false;
+  apples = apples.filter(a => {
+    if (a.x === head.x && a.y === head.y) {
+      ate = true; score++;
+      document.getElementById('score').textContent = score;
+      return false;
+    }
+    return true;
+  });
+  document.getElementById('apple-count').textContent = apples.length;
+  if (!ate) snake.body.pop();
+}
+
+function hexAlpha(hex, alpha) {
+  const a = Math.round(alpha * 255).toString(16).padStart(2,'0');
+  return hex + a;
+}
+
+function drawSegment(x, y, color, isHead) {
+  const px = x * CELL + 1, py = y * CELL + 1;
+  const s = CELL - 2;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(px, py, s, s, isHead ? 5 : 2);
+  ctx.fill();
+  if (isHead) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    const ex = dir.x, ey = dir.y;
+    const ox = ey !== 0 ? 4 : (ex > 0 ? 12 : 4);
+    const oy = ex !== 0 ? 4 : (ey > 0 ? 12 : 4);
+    const ox2 = ey !== 0 ? 12 : ox;
+    const oy2 = ex !== 0 ? 12 : oy;
+    ctx.beginPath(); ctx.arc(px + ox,  py + oy,  2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + ox2, py + oy2, 2, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= COLS; i++) {
+    ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,canvas.height); ctx.stroke();
+  }
+  for (let j = 0; j <= ROWS; j++) {
+    ctx.beginPath(); ctx.moveTo(0,j*CELL); ctx.lineTo(canvas.width,j*CELL); ctx.stroke();
+  }
+
+  apples.forEach(a => {
+    a.pulse = (a.pulse + 0.07) % (Math.PI * 2);
+    const r = 5 + Math.sin(a.pulse) * 1.2;
+    const px = a.x * CELL + CELL/2, py = a.y * CELL + CELL/2;
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#86efac';
+    ctx.fillRect(px-1, py-r-3, 2, 5);
+    ctx.shadowBlur = 0;
+  });
+
+  const n = snake.body.length;
+  snake.body.forEach((seg, i) => {
+    const t = i / n;
+    const alpha = i === 0 ? 1 : 0.55 + 0.45 * (1 - t);
+    const color = i === 0 ? snake.color : hexAlpha(snake.color, alpha);
+    drawSegment(seg.x, seg.y, color, i === 0);
+  });
+
+  particles = particles.filter(p => p.life > 0);
+  particles.forEach(p => {
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.12;
+    p.vx *= 0.97;
+    p.life -= p.decay;
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    const s = p.size * p.life;
+    if (p.square) {
+      ctx.fillRect(p.x - s/2, p.y - s/2, s, s);
+    } else {
+      ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+function tick() { step(); draw(); }
+
+function initGame() {
+  score = 0; explosions = 0;
+  apples = []; particles = [];
+  snake = null;
+  document.getElementById('score').textContent = 0;
+  document.getElementById('apple-count').textContent = 0;
+  document.getElementById('exp-count').textContent = 0;
+  initSnake(false);
+  spawnApple(); spawnApple(); spawnApple();
+  clearInterval(gameLoop);
+  clearInterval(appleTimer);
+  gameLoop = setInterval(tick, 140);
+  appleTimer = setInterval(() => {
+    if (apples.length < 8) {
+      spawnApple();
+      document.getElementById('apple-count').textContent = apples.length;
+    }
+  }, 3000);
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = Math.floor((e.clientX - rect.left) * scaleX / CELL);
+  const my = Math.floor((e.clientY - rect.top)  * scaleY / CELL);
+  if (snake.body.some(s => s.x === mx && s.y === my)) explode();
+});
+
+document.addEventListener('keydown', e => {
+  const map = {
+    ArrowUp:{x:0,y:-1}, ArrowDown:{x:0,y:1},
+    ArrowLeft:{x:-1,y:0}, ArrowRight:{x:1,y:0},
+    w:{x:0,y:-1}, s:{x:0,y:1}, a:{x:-1,y:0}, d:{x:1,y:0}
+  };
+  const nd = map[e.key];
+  if (nd && !(nd.x === -dir.x && nd.y === -dir.y)) {
+    nextDir = nd;
+    e.preventDefault();
+  }
+});
+
+initGame();
+</script>
+</body>
+</html>
